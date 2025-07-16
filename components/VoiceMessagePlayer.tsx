@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Audio } from 'expo-av';
+import { Audio, AVPlaybackStatus } from 'expo-av';
 import { useEffect, useState } from 'react';
 import { Animated, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import AudioWaveform from './AudioWaveform';
@@ -56,7 +56,7 @@ const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({ uri, waveform =
     }
   };
 
-  const onPlaybackStatusUpdate = (status: Audio.AVPlaybackStatus) => {
+  const onPlaybackStatusUpdate = (status: Audio.AVPlaybackstatus) => {
     if (status.isLoaded) {
       setPosition(status.positionMillis);
       if (status.didJustFinish) {
