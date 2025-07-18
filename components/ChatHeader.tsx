@@ -1,23 +1,29 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const ChatHeader = () => (
-  <View style={styles.container}>
-    <Ionicons name="person-circle" size={40} color="#25D366" />
-    <Text style={styles.contactName}>Nom du contact</Text>
-    <View style={styles.icons}>
-      <Ionicons name="call" size={24} color="#075E54" style={styles.icon} />
-      <Ionicons name="ellipsis-vertical" size={24} color="#075E54" />
+const ChatHeader = () => {
+  const insets = useSafeAreaInsets();
+  
+  return (
+    <View style={[styles.container, { paddingTop: Platform.OS === 'android' ? insets.top + 10 : 10 }]}>
+      <Ionicons name="person-circle" size={40} color="#25D366" />
+      <Text style={styles.contactName}>Nom du contact</Text>
+      <View style={styles.icons}>
+        <Ionicons name="call" size={24} color="#075E54" style={styles.icon} />
+        <Ionicons name="ellipsis-vertical" size={24} color="#075E54" />
+      </View>
     </View>
-  </View>
-);
+  );
+};
 
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 10,
+    paddingHorizontal: 10,
+    paddingBottom: 10,
     backgroundColor: '#F6F6F6',
     borderBottomWidth: 1,
     borderBottomColor: '#E8E8E8',

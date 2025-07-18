@@ -20,8 +20,12 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true,
-      "package": "com.demacedius.pocwhatsapp"
+      "edgeToEdgeEnabled": false,
+      "package": "com.demacedius.pocwhatsapp",
+      "permissions": [
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "bundler": "metro",

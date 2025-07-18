@@ -2,7 +2,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import React, { useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Animated, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import AudioWaveform from './AudioWaveform';
 
 interface MessageInputProps {
@@ -14,9 +14,9 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSendMessage }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordTime, setRecordTime] = useState(0);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
-    const [volume, setVolume] = useState(0);
   const [waveform, setWaveform] = useState<number[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const progress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (isRecording) {
@@ -37,6 +37,18 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSendMessage }) => {
     };
   }, [isRecording]);
 
+  useEffect(() => {
+    return () => {
+      if (recording) {
+        recording.getStatusAsync().then(status => {
+          if (status.canRecord || status.isRecording) {
+            recording.stopAndUnloadAsync().catch(console.error);
+          }
+        }).catch(console.error);
+      }
+    };
+  }, [recording]);
+
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -45,47 +57,119 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSendMessage }) => {
 
   const handleSendMessage = () => {
     if (text.trim().length > 0) {
+      console.log('Sending text message:', text.trim());
       onSendMessage({ type: 'text', content: text.trim() });
       setText('');
     }
   };
 
   const handlePressIn = async () => {
+    if (isRecording) {
+      console.log('Already recording, skipping...');
+      return;
+    }
+
     try {
-      await Audio.requestPermissionsAsync();
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('Permission to record audio not granted');
+        return;
+      }
+
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
       });
-      const { recording } = await Audio.Recording.createAsync(
-        { ...Audio.RecordingOptionsPresets.HIGH_QUALITY, isMeteringEnabled: true },
+
+      const recordingOptions = Platform.OS === 'android' ? {
+        ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        isMeteringEnabled: true,
+        android: {
+          extension: '.m4a',
+          outputFormat: Audio.RECORDING_OPTION_ANDROID_OUTPUT_FORMAT_MPEG_4,
+          audioEncoder: Audio.RECORDING_OPTION_ANDROID_AUDIO_ENCODER_AAC,
+          sampleRate: 44100,
+          numberOfChannels: 1,
+          bitRate: 128000,
+        },
+      } : {
+        ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        isMeteringEnabled: true,
+        ios: {
+          extension: '.m4a',
+          audioQuality: Audio.RECORDING_OPTION_IOS_AUDIO_QUALITY_HIGH,
+          sampleRate: 44100,
+          numberOfChannels: 1,
+          bitRate: 128000,
+          linearPCMBitDepth: 16,
+          linearPCMIsBigEndian: false,
+          linearPCMIsFloat: false,
+        },
+      };
+
+      console.log('Starting recording...');
+      const { recording: newRecording } = await Audio.Recording.createAsync(
+        recordingOptions,
         (status) => {
           if (status.isRecording && status.metering) {
             const db = status.metering;
-            // Convert dB to a positive height for the waveform bar
-            const height = Math.max(2, Math.pow(10, db / 40) * 10);
+            const normalizedDb = Math.max(-40, Math.min(0, db));
+            let height = Math.max(2, ((normalizedDb + 40) / 40) * 25 + 3);
+            
+            if (Platform.OS === 'ios' && db < -30) {
+              height = Math.max(2, height * 0.15);
+            }
+            
             setWaveform(prev => [...prev, height]);
           }
         },
         100
       );
-      setRecording(recording);
+      
+      setRecording(newRecording);
       setIsRecording(true);
+      console.log('Recording started successfully');
     } catch (err) {
       console.error('Failed to start recording', err);
+      setRecording(null);
+      setIsRecording(false);
+      setWaveform([]);
     }
   };
 
   const handlePressOut = async () => {
+    console.log('Stopping recording...');
     setIsRecording(false);
+    
     if (recording) {
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      if (uri) {
-        onSendMessage({ type: 'voice', content: uri, waveform: waveform });
+      try {
+        const status = await recording.getStatusAsync();
+        console.log('Recording status before stop:', status);
+        if (status.canRecord) {
+          await recording.stopAndUnloadAsync();
+          const uri = recording.getURI();
+          console.log('Recording URI after stop:', uri);
+          console.log('Waveform data:', waveform);
+          if (uri && waveform.length > 0) {
+            console.log('Sending voice message:', uri, 'waveform length:', waveform.length);
+            onSendMessage({ type: 'voice', content: uri, waveform: [...waveform] });
+          } else {
+            console.log('Voice message not sent - uri:', uri, 'waveform length:', waveform.length);
+            if (!uri) console.log('ERROR: URI is null or undefined');
+            if (waveform.length === 0) console.log('ERROR: Waveform is empty');
+          }
+        } else {
+          console.log('Recording cannot record, status:', status);
+        }
+      } catch (error) {
+        console.error('Error stopping recording:', error);
+      } finally {
+        setRecording(null);
+        setWaveform([]);
       }
-      setRecording(null);
-      setWaveform([]);
     }
   };
 
@@ -95,19 +179,19 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSendMessage }) => {
         <View style={styles.recordingContainer}>
           <Text style={styles.recordTime}>{formatTime(recordTime)}</Text>
           <ScrollView horizontal={true} showsHorizontalScrollIndicator={false} style={styles.waveformContainer}>
-            <AudioWaveform waveform={waveform} />
+            <AudioWaveform waveform={waveform} progress={progress} />
           </ScrollView>
           <TouchableOpacity onPress={handlePressOut}>
             <Ionicons name="send" size={24} color="#25D366" />
           </TouchableOpacity>
         </View>
       ) : (
-        <>
+        <View style={styles.inputRow}>
           <View style={styles.inputContainer}>
             <Ionicons name="attach" size={24} color="#8E8E93" style={styles.icon} />
             <TextInput 
-              style={[styles.input, { maxHeight: 100 }]} // Limite la hauteur pour éviter qu'il ne prenne tout l'écran
-              placeholder="Type a message" 
+              style={styles.input}
+              placeholder="Tapez un message..." 
               multiline={true}
               value={text}
               onChangeText={setText}
@@ -115,18 +199,18 @@ const MessageInput: React.FC<MessageInputProps> = ({ onSendMessage }) => {
           </View>
           <TouchableOpacity 
             style={styles.micButton} 
-            onPress={text.length > 0 ? handleSendMessage : handlePressIn} 
-            onLongPress={text.length > 0 ? undefined : handlePressIn} // Only allow long press for mic
-            delayLongPress={200} // Adjust as needed
+            onPress={text.length > 0 ? handleSendMessage : undefined} 
+            onPressIn={text.length > 0 ? undefined : handlePressIn}
+            onPressOut={text.length > 0 ? undefined : handlePressOut}
+            delayLongPress={200}
           >
             <Ionicons name={text.length > 0 ? "send" : "mic"} size={24} color="white" />
           </TouchableOpacity>
-        </>
+        </View>
       )}
     </View>
   );
 };
-
 
 const styles = StyleSheet.create({
   container: {
@@ -135,24 +219,30 @@ const styles = StyleSheet.create({
     padding: 10,
     backgroundColor: '#F6F6F6',
   },
+  inputRow: {
+    flexDirection: 'row',
+    flex: 1,
+    alignItems: 'center',
+  },
   inputContainer: {
     flexGrow: 1,
     flexShrink: 1,
     flexDirection: 'row',
-    alignItems: 'flex-end', // Align items to the bottom when input grows
+    alignItems: 'flex-start',
     backgroundColor: 'white',
     borderRadius: 20,
     paddingHorizontal: 10,
-    maxHeight: 120, // Prevent the input from growing too large
+    paddingVertical: 5,
   },
   input: {
     flex: 1,
     paddingVertical: 10,
     fontSize: 16,
-    textAlignVertical: 'top', // Ensure text starts from the top in multiline input
+    textAlignVertical: 'top',
   },
   icon: {
     marginRight: 10,
+    marginTop: 8,
   },
   micButton: {
     marginLeft: 10,
